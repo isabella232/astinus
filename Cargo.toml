@@ -4,7 +4,10 @@ version = "0.1.0"
 authors = ["Stephen M. Coakley <me@stephencoakley.com>"]
 
 [dependencies]
-cocoa = "0.8.1"
+csv = "0.14"
+gio = "0.1.2"
+log = "0.3.7"
+simplelog = "0.4.2"
 
 [dependencies.gtk]
 version = "0.1.2"
