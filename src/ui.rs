@@ -64,9 +64,7 @@ impl MainWindow {
         let window: Window = builder.get_object("window").unwrap();
         window.set_application(Some(application));
 
-        let toolbar: Toolbar = builder.get_object("toolbar").unwrap();
-
-        let open_button: ToolButton = builder.get_object("open_button").unwrap();
+        let open_button: Button = builder.get_object("open_button").unwrap();
         let cloned = main.clone();
         open_button.connect_clicked(move |_| {
             cloned.show_open_dialog();
@@ -177,7 +175,7 @@ impl MainWindow {
 
         // Create a new model.
         let mut column_types = Vec::new();
-        for _ in 0..spreadsheet.width() {
+        for _ in 0..spreadsheet.get_column_count() {
             column_types.push(Type::String);
         }
 
@@ -186,7 +184,7 @@ impl MainWindow {
     }
 
     /// Set the current spreadsheet view.
-    fn set_spreadsheet_view(&self, start: u64, end: u64) -> Result<(), Box<Error>> {
+    fn set_spreadsheet_view(&self, start: i64, end: i64) -> Result<(), Box<Error>> {
         let spreadsheet_view: TreeView = self.builder.get_object("spreadsheet_view").unwrap();
         let spreadsheet = self.spreadsheet.borrow();
 
@@ -196,7 +194,7 @@ impl MainWindow {
 
                 model.clear();
 
-                for row in spreadsheet.get_range(start, end)? {
+                for row in spreadsheet.get_rows(start, end)? {
                     let iter = model.append();
 
                     for (column, cell) in row.into_iter().enumerate() {

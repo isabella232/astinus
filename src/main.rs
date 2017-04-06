@@ -6,6 +6,7 @@ extern crate log;
 extern crate rusqlite;
 extern crate simplelog;
 
+mod formats;
 mod spreadsheet;
 mod ui;
 
@@ -14,6 +15,8 @@ use gtk::Application;
 
 pub static LICENSE: &'static str = include_str!("../LICENSE");
 pub static VERSION: &'static str = env!("CARGO_PKG_VERSION");
+
+pub type Result<T> = std::result::Result<T, Box<std::error::Error>>;
 
 
 fn startup(application: &Application) {
