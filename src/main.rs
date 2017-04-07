@@ -41,23 +41,14 @@ fn startup(application: &Application) {
     window.window().show_all();
 }
 
-fn activate(application: &Application) {}
+fn activate(_: &Application) {
+}
 
 fn quit(application: &Application) {
     info!("quit");
     for window in application.get_windows() {
         window.close();
     }
-}
-
-fn connect_action<T: IsA<gio::ActionMap>, F: Fn() + 'static>(map: &T, name: &str, f: F) {
-    let action = gio::SimpleAction::new(name, None);
-
-    action.connect_activate(move |_,_| {
-        f();
-    });
-
-    map.add_action(&action);
 }
 
 fn main() {

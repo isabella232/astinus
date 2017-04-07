@@ -3,6 +3,7 @@ use formats;
 use Result;
 use rusqlite::Connection;
 use std::cell::Cell;
+use std::cmp::{max, min};
 use std::path::Path;
 
 
@@ -64,6 +65,14 @@ impl Spreadsheet {
         spreadsheet.clear_dirty();
 
         Ok(spreadsheet)
+    }
+
+    /// Save the spreadsheet to a file.
+    pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        formats::save_csv(path.as_ref(), self)?;
+        self.clear_dirty();
+
+        Ok(())
     }
 
     /// Check if the spreadsheet has been modified.
@@ -222,6 +231,16 @@ impl Spreadsheet {
 
     /// Delete a range of rows.
     pub fn delete_rows(&self, start: i64, end: i64) -> Result<()> {
+        let start = max(0, min(self.get_row_count(), start));
+        let end = max(0, min(self.get_row_count(), end));
+
+        if start > end {
+            return Err("Starting row must be greater than or equal to the ending row".into());
+        }
+
+        let count = end - start + 1;
+        info!("deleting {} rows ({} - {})", count, start, end);
+
         // Delete cells belonging to the rows.
         self.database.execute("
             DELETE FROM cells
@@ -232,16 +251,16 @@ impl Spreadsheet {
         ])?;
 
         // Shift rows after the deleted range back up.
-        let shift_amount = end - start;
         self.database.execute("
             UPDATE cells
             SET row = row - ?
             WHERE row > ?
         ", &[
-            &shift_amount,
+            &count,
             &end,
         ])?;
 
+        self.row_count.set(self.get_row_count() - count);
         self.dirty.set(true);
 
         Ok(())

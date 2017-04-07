@@ -5,7 +5,7 @@ use Result;
 use spreadsheet::Spreadsheet;
 use std::boxed::Box;
 use std::cell::{Cell, RefCell};
-use std::cmp;
+use std::cmp::{max, min};
 use std::error::Error;
 use std::path::*;
 use std::rc::Rc;
@@ -53,6 +53,13 @@ pub fn show_about_dialog() {
 #[derive(Clone)]
 pub struct MainWindow {
     builder: Builder,
+    window: ApplicationWindow,
+    page_entry: SpinButton,
+    spreadsheet_view: TreeView,
+    status_bar: Statusbar,
+    delete_dialog: Dialog,
+    open_dialog: FileChooserDialog,
+    save_dialog: FileChooserDialog,
     spreadsheet: Rc<RefCell<Option<Spreadsheet>>>,
     page: Rc<Cell<i64>>,
 }
@@ -64,6 +71,13 @@ impl MainWindow {
 
         let main = Self {
             builder: builder.clone(),
+            window: builder.get_object("window").unwrap(),
+            page_entry: builder.get_object("page_entry").unwrap(),
+            spreadsheet_view: builder.get_object("spreadsheet_view").unwrap(),
+            status_bar: builder.get_object("status_bar").unwrap(),
+            delete_dialog: builder.get_object("delete_dialog").unwrap(),
+            open_dialog: builder.get_object("open_dialog").unwrap(),
+            save_dialog: builder.get_object("save_dialog").unwrap(),
             spreadsheet: Rc::new(RefCell::new(None)),
             page: Rc::new(Cell::new(1)),
         };
@@ -91,18 +105,33 @@ impl MainWindow {
             main.go_to_next_page();
         }));
 
-        let cloned = main.clone();
-        window.connect_delete_event(move |_, _| {
-            cloned.close_file();
-            Inhibit(false)
-        });
+        window.add_action(&create_action("delete", &main, false, |main| {
+            main.show_delete_dialog();
+        }));
+
+        {
+            let cloned = main.clone();
+            window.connect_delete_event(move |_, _| {
+                cloned.close_file();
+                Inhibit(false)
+            });
+        }
+
+        {
+            let cloned = main.clone();
+            main.page_entry.connect_value_changed(move |page_entry| {
+                cloned.go_to_page(page_entry.get_value_as_int() as i64);
+            });
+        }
+
+        main.update_state();
 
         main
     }
 
     /// Get the main window object.
     pub fn window(&self) -> ApplicationWindow {
-        self.builder.get_object("window").unwrap()
+        self.window.clone()
     }
 
     /// Check if a file is currently opened in this window.
@@ -125,15 +154,20 @@ impl MainWindow {
     }
 
     /// Save the active file if one is open.
-    pub fn save_file(&self) {}
+    pub fn save_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        if let Some(spreadsheet) = self.spreadsheet.borrow().as_ref() {
+            spreadsheet.save(path)?;
+        }
+
+        Ok(())
+    }
 
     /// Close the active file if one is open.
     pub fn close_file(&self) {
         if let Some(spreadsheet) = self.spreadsheet.borrow_mut().take() {
             if spreadsheet.is_dirty() {
-                let window = self.window();
                 let dialog = MessageDialog::new(
-                    Some(&window),
+                    Some(&self.window),
                     DIALOG_MODAL,
                     MessageType::Warning,
                     ButtonsType::YesNo,
@@ -147,7 +181,7 @@ impl MainWindow {
                 let response = dialog.run();
                 dialog.destroy();
 
-                if response == ResponseType::Ok.into() {
+                if response == ResponseType::Yes.into() {
                     self.show_save_dialog();
                 }
             }
@@ -187,7 +221,7 @@ impl MainWindow {
 
     /// Get the last row number currently being displayed.
     pub fn get_last_row_offset(&self) -> i64 {
-        cmp::min(
+        min(
             self.get_first_row_offset() + PAGE_SIZE - 1,
             self.get_row_count() - 1,
         )
@@ -195,8 +229,10 @@ impl MainWindow {
 
     /// Jump the spreadsheet view to a page.
     pub fn go_to_page(&self, page: i64) {
+        let page = max(1, min(page, self.get_page_count()));
+
         if self.get_current_page() != page {
-            self.page.set(cmp::max(1, page));
+            self.page.set(page);
 
             self.update_spreadsheet_view()
                 .unwrap_or_else(|e| self.show_error_dialog(e));
@@ -212,6 +248,77 @@ impl MainWindow {
     /// Go to the previous page of spreadsheet rows.
     pub fn go_to_previous_page(&self) {
         self.go_to_page(self.get_current_page() - 1);
+    }
+
+    pub fn show_delete_dialog(&self) {
+        if self.delete_dialog.run() == ResponseType::Ok.into() {
+            let from_entry: Entry = self.builder.get_object("delete_rows_from_entry").unwrap();
+            let to_entry: Entry = self.builder.get_object("delete_rows_to_entry").unwrap();
+
+            let from: String = from_entry.get_text().unwrap();
+            let to: String = to_entry.get_text().unwrap();
+            info!("from: {} to: {}", from, to);
+            let from: i64 = from.parse().unwrap();
+            let to: i64 = to.parse().unwrap();
+
+            if from <= to {
+                if let Some(spreadsheet) = self.spreadsheet.borrow().as_ref() {
+                    spreadsheet.delete_rows(from - 1, to - 1)
+                        .unwrap_or_else(|e| self.show_error_dialog(e));
+                }
+
+                self.update_spreadsheet_view()
+                    .unwrap_or_else(|e| self.show_error_dialog(e));
+                self.update_state();
+            } else {
+                warn!("starting row to delete is larger then ending row: {} > {}", from, to);
+            }
+        }
+
+        self.delete_dialog.hide();
+    }
+
+    pub fn show_open_dialog(&self) {
+        let mut filename = None;
+
+        if self.open_dialog.get_filter().is_none() {
+            let text_filter = FileFilter::new();
+            text_filter.set_name("Text files");
+            text_filter.add_pattern("*.csv");
+            text_filter.add_pattern("*.tsv");
+            text_filter.add_pattern("*.txt");
+            self.open_dialog.add_filter(&text_filter);
+
+            let excel_filter = FileFilter::new();
+            excel_filter.set_name("Excel spreadsheet");
+            excel_filter.add_pattern("*.xls");
+            excel_filter.add_pattern("*.xlsx");
+            self.open_dialog.add_filter(&excel_filter);
+        }
+
+        if self.open_dialog.run() == ResponseType::Ok.into() {
+            filename = self.open_dialog.get_filename();
+        }
+        self.open_dialog.hide();
+
+        if let Some(filename) = filename {
+            self.open_file(filename)
+                .unwrap_or_else(|e| self.show_error_dialog(e));
+        }
+    }
+
+    pub fn show_save_dialog(&self) {
+        let mut filename = None;
+
+        if self.save_dialog.run() == ResponseType::Ok.into() {
+            filename = self.save_dialog.get_filename();
+        }
+        self.save_dialog.hide();
+
+        if let Some(filename) = filename {
+            self.save_file(filename)
+                .unwrap_or_else(|e| self.show_error_dialog(e));
+        }
     }
 
     fn show_error_dialog(&self, error: Box<Error>) {
@@ -234,51 +341,6 @@ impl MainWindow {
         dialog.destroy();
     }
 
-    fn show_open_dialog(&self) {
-        let file_chooser: FileChooserDialog = self.builder.get_object("open_dialog").unwrap();
-        let mut filename = None;
-
-        if file_chooser.get_filter().is_none() {
-            let text_filter = FileFilter::new();
-            text_filter.set_name("Text files");
-            text_filter.add_pattern("*.csv");
-            text_filter.add_pattern("*.tsv");
-            text_filter.add_pattern("*.txt");
-            file_chooser.add_filter(&text_filter);
-
-            let excel_filter = FileFilter::new();
-            excel_filter.set_name("Excel spreadsheet");
-            excel_filter.add_pattern("*.xls");
-            excel_filter.add_pattern("*.xlsx");
-            file_chooser.add_filter(&excel_filter);
-        }
-
-        if file_chooser.run() == ResponseType::Ok.into() {
-            filename = file_chooser.get_filename();
-        }
-        file_chooser.hide();
-
-        if let Some(filename) = filename {
-            self.open_file(filename)
-                .unwrap_or_else(|e| self.show_error_dialog(e));
-        }
-    }
-
-    fn show_save_dialog(&self) {
-        let file_chooser: FileChooserDialog = self.builder.get_object("save_dialog").unwrap();
-        let mut filename = None;
-
-        if file_chooser.run() == ResponseType::Ok.into() {
-            filename = file_chooser.get_filename();
-        }
-        file_chooser.hide();
-
-        if let Some(filename) = filename {
-            // self.open_file(filename);
-            info!("save: {:?}", filename);
-        }
-    }
-
     /// Update the UI based on the current state of the window.
     fn update_state(&self) {
         // Update window actions.
@@ -287,10 +349,13 @@ impl MainWindow {
         self.set_action_enabled("close", file_actions);
         self.set_action_enabled("previous_page", file_actions && self.get_current_page() > 1);
         self.set_action_enabled("next_page", file_actions && self.get_current_page() < self.get_page_count());
+        self.set_action_enabled("delete", file_actions);
+
+        // Update the page entry.
+        self.page_entry.set_range(1.0, self.get_page_count() as f64);
+        self.page_entry.set_value(self.get_current_page() as f64);
 
         // Update the status bar contents.
-        let status_bar: Statusbar = self.builder.get_object("status_bar").unwrap();
-
         let page_status = format!(
             "Page {} of {} (rows {} - {}) of {} rows",
             self.get_current_page(),
@@ -299,8 +364,8 @@ impl MainWindow {
             self.get_last_row_offset() + 1,
             self.get_row_count(),
         );
-        status_bar.remove_all(0);
-        status_bar.push(0, &page_status);
+        self.status_bar.remove_all(0);
+        self.status_bar.push(0, &page_status);
     }
 
     /// Enable or disable a window action.
@@ -311,15 +376,14 @@ impl MainWindow {
 
     /// Prepare the spreadsheet view for displaying the current spreadsheet.
     fn prepare_spreadsheet_view(&self) {
-        let spreadsheet_view: TreeView = self.builder.get_object("spreadsheet_view").unwrap();
         let spreadsheet = self.spreadsheet.borrow();
 
         // Remove the previous model.
-        spreadsheet_view.set_model::<TreeModel>(None);
+        self.spreadsheet_view.set_model::<TreeModel>(None);
 
         // Remove all existing columns.
-        for column in spreadsheet_view.get_columns() {
-            spreadsheet_view.remove_column(&column);
+        for column in self.spreadsheet_view.get_columns() {
+            self.spreadsheet_view.remove_column(&column);
         }
 
         if let Some(spreadsheet) = spreadsheet.as_ref() {
@@ -339,7 +403,7 @@ impl MainWindow {
                 column.pack_start(&renderer, true);
                 column.add_attribute(&renderer, "text", index as i32);
 
-                spreadsheet_view.append_column(&column);
+                self.spreadsheet_view.append_column(&column);
             }
 
             // Create a new model.
@@ -349,7 +413,7 @@ impl MainWindow {
             }
 
             let model = ListStore::new(&column_types);
-            spreadsheet_view.set_model(Some(&model));
+            self.spreadsheet_view.set_model(Some(&model));
         }
     }
 
@@ -359,11 +423,10 @@ impl MainWindow {
         let start = self.get_first_row_offset();
         let end = self.get_last_row_offset();
 
-        let spreadsheet_view: TreeView = self.builder.get_object("spreadsheet_view").unwrap();
         let spreadsheet = self.spreadsheet.borrow();
 
         if let Some(spreadsheet) = spreadsheet.as_ref() {
-            if let Some(model) = spreadsheet_view.get_model() {
+            if let Some(model) = self.spreadsheet_view.get_model() {
                 let model: ListStore = model.downcast().unwrap();
 
                 model.clear();
@@ -377,7 +440,7 @@ impl MainWindow {
                     }
                 }
 
-                spreadsheet_view.set_model(Some(&model));
+                self.spreadsheet_view.set_model(Some(&model));
             }
         }
 
@@ -385,7 +448,6 @@ impl MainWindow {
     }
 
     fn on_edit(&self, _: &CellRendererText, column: i64, path: TreePath, value: &str) {
-        let spreadsheet_view: TreeView = self.builder.get_object("spreadsheet_view").unwrap();
         let spreadsheet = self.spreadsheet.borrow();
         let row_offset = path.get_indices()[0] as i64;
         let row = self.get_first_row_offset() + row_offset;
@@ -395,7 +457,7 @@ impl MainWindow {
                 .unwrap_or_else(|e| self.show_error_dialog(e));
         }
 
-        if let Some(model) = spreadsheet_view.get_model() {
+        if let Some(model) = self.spreadsheet_view.get_model() {
             let model: ListStore = model.downcast().unwrap();
             let iter = model.get_iter(&path).unwrap();
 
