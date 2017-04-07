@@ -24,22 +24,17 @@ fn startup(application: &Application) {
     let app_menu = ui::build_app_menu();
     application.set_app_menu(Some(&app_menu));
 
+    application.add_action(&ui::create_action("quit", application, true, |application| {
+        quit(&application);
+    }));
+
+    application.add_action(&ui::create_action("about", &(), true, |_| {
+        ui::show_about_dialog();
+    }));
+
     // Build the menu bar.
     let window_menu = ui::build_window_menu();
     application.set_menubar(Some(&window_menu));
-
-    let quit_action = gio::SimpleAction::new("quit", None);
-    let cloned = application.clone();
-    quit_action.connect_activate(move |_,_| {
-        quit(&cloned);
-    });
-    application.add_action(&quit_action);
-
-    let about_action = gio::SimpleAction::new("about", None);
-    about_action.connect_activate(move |_,_| {
-        ui::show_about_dialog();
-    });
-    application.add_action(&about_action);
 
     // Create the main window.
     let window = ui::MainWindow::new(&application);
@@ -53,6 +48,16 @@ fn quit(application: &Application) {
     for window in application.get_windows() {
         window.close();
     }
+}
+
+fn connect_action<T: IsA<gio::ActionMap>, F: Fn() + 'static>(map: &T, name: &str, f: F) {
+    let action = gio::SimpleAction::new(name, None);
+
+    action.connect_activate(move |_,_| {
+        f();
+    });
+
+    map.add_action(&action);
 }
 
 fn main() {

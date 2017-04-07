@@ -172,16 +172,20 @@ impl Spreadsheet {
         let mut rows = Vec::new();
         let mut row = Vec::new();
 
-        while let Some(Ok(result)) = results.next() {
-            let current_row_offset: i64 = result.get(0);
+        while let Some(result) = results.next() {
+            let result = result?;
+            let current_row: i64 = result.get(0);
 
-            if current_row_offset > rows.len() as i64 {
+            if current_row - start > rows.len() as i64 {
                 rows.push(row);
                 row = Vec::new();
             }
 
             row.push(result.get(1));
         }
+
+        rows.push(row);
+        info!("got back {} rows", rows.len());
 
         Ok(rows)
     }
