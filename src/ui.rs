@@ -395,6 +395,19 @@ impl MainWindow {
         }
 
         if let Some(spreadsheet) = spreadsheet.as_ref() {
+            // Row ID column.
+            {
+                let column = TreeViewColumn::new();
+                column.set_resizable(true);
+                column.set_title("#");
+
+                let renderer = CellRendererText::new();
+                column.pack_start(&renderer, true);
+                column.add_attribute(&renderer, "text", 0);
+
+                self.spreadsheet_view.append_column(&column);
+            }
+
             // Populate new columns.
             for (index, title) in spreadsheet.get_columns().into_iter().enumerate() {
                 let column = TreeViewColumn::new();
@@ -409,13 +422,14 @@ impl MainWindow {
                 });
 
                 column.pack_start(&renderer, true);
-                column.add_attribute(&renderer, "text", index as i32);
+                column.add_attribute(&renderer, "text", index as i32 + 1);
 
                 self.spreadsheet_view.append_column(&column);
             }
 
             // Create a new model.
             let mut column_types = Vec::new();
+            column_types.push(Type::String);
             for _ in 0..spreadsheet.get_column_count() {
                 column_types.push(Type::String);
             }
@@ -439,12 +453,14 @@ impl MainWindow {
 
                 model.clear();
 
-                for row in spreadsheet.get_rows(start, end)? {
+                for (row_num, row) in spreadsheet.get_rows(start, end)?.into_iter().enumerate() {
                     let iter = model.append();
+                    let row_num = (row_num as i64 + start + 1).to_value();
+                    model.set_value(&iter, 0, &row_num);
 
                     for (column, cell) in row.into_iter().enumerate() {
                         let value = cell.as_ref().into();
-                        model.set_value(&iter, column as u32, &value);
+                        model.set_value(&iter, column as u32 + 1, &value);
                     }
                 }
 
@@ -470,7 +486,7 @@ impl MainWindow {
             let iter = model.get_iter(&path).unwrap();
 
             let value = value.to_value();
-            model.set_value(&iter, column as u32, &value);
+            model.set_value(&iter, column as u32 + 1, &value);
         }
     }
 }
