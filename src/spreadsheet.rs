@@ -9,10 +9,15 @@ use std::path::Path;
 
 /// A loaded spreadsheet file. Provides methods for loading, saving, reading, and editing.
 pub struct Spreadsheet {
+    /// The name of the spreadsheet.
+    name: String,
+
     /// Open SQLite database for storing spreadsheet data.
     database: Connection,
+
     /// Whether the spreadhseet has been modified.
     dirty: Cell<bool>,
+
     /// Number of rows in the spreadsheet.
     row_count: Cell<i64>,
 }
@@ -45,6 +50,7 @@ impl Spreadsheet {
         ").unwrap();
 
         Self {
+            name: String::from("Untitled"),
             database: connection,
             dirty: Cell::new(false),
             row_count: Cell::new(0),
@@ -60,8 +66,12 @@ impl Spreadsheet {
             _ => return Err("Unknown file extension.".into()),
         };
 
-        let spreadsheet = Self::new();
+        let mut spreadsheet = Self::new();
         loader(path, &spreadsheet)?;
+
+        if let Some(file_name) = path.file_name() {
+            spreadsheet.name = format!("{}", file_name.to_string_lossy());
+        }
         spreadsheet.clear_dirty();
 
         Ok(spreadsheet)
@@ -73,6 +83,11 @@ impl Spreadsheet {
         self.clear_dirty();
 
         Ok(())
+    }
+
+    /// Get the name of the spreadsheet.
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     /// Check if the spreadsheet has been modified.
@@ -170,7 +185,7 @@ impl Spreadsheet {
 
     /// Get a range of values.
     pub fn get_rows(&self, start: i64, end: i64) -> Result<Vec<Vec<Option<String>>>> {
-        let mut stmt = self.database.prepare("
+        let mut stmt = self.database.prepare_cached("
             SELECT row, value FROM cells
             WHERE row >= ? AND row <= ?
             ORDER BY row, column ASC

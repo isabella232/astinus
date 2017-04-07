@@ -366,6 +366,14 @@ impl MainWindow {
         );
         self.status_bar.remove_all(0);
         self.status_bar.push(0, &page_status);
+
+        // Update the titlebar.
+        if let Some(spreadsheet) = self.spreadsheet.borrow().as_ref() {
+            let title = format!("Astinus - {}", spreadsheet.name());
+            self.window.set_title(&title);
+        } else {
+            self.window.set_title("Astinus");
+        }
     }
 
     /// Enable or disable a window action.
